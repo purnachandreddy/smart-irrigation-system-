@@ -1,0 +1,310 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="description" content="Smart Plant Irrigation Dashboard — monitor and control your ESP32 adaptive plant watering system">
+<title>🌱 Smart Plant Irrigation</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<!-- ════════════════════════════════════════════════════════ -->
+<!--  HEADER                                                 -->
+<!-- ════════════════════════════════════════════════════════ -->
+<header class="header" id="header">
+  <div class="header-inner">
+    <div class="header-brand">
+      <span class="header-icon">🌱</span>
+      <div>
+        <h1 class="header-title">Smart Plant</h1>
+        <p class="header-sub">Adaptive Irrigation</p>
+      </div>
+    </div>
+    <div class="header-meta">
+      <div class="status-pill" id="wifi-pill">
+        <span class="pill-dot" id="wifi-dot"></span>
+        <span id="wifi-label">Connecting…</span>
+      </div>
+      <div class="status-pill">
+        <span class="pill-dot green"></span>
+        <span id="time-label">--:--:--</span>
+      </div>
+    </div>
+  </div>
+</header>
+
+<!-- ════════════════════════════════════════════════════════ -->
+<!--  ALERT BANNER (errors / warnings)                      -->
+<!-- ════════════════════════════════════════════════════════ -->
+<div class="alert-banner hidden" id="alert-banner">
+  <span class="alert-icon">⚠️</span>
+  <span id="alert-text"></span>
+  <button class="alert-close" onclick="document.getElementById('alert-banner').classList.add('hidden')">✕</button>
+</div>
+
+<!-- ════════════════════════════════════════════════════════ -->
+<!--  MAIN GRID                                              -->
+<!-- ════════════════════════════════════════════════════════ -->
+<main class="grid" id="main-grid">
+
+  <!-- ── Hero card: moisture gauge ─────────────────────── -->
+  <section class="card card-hero" id="card-moisture" aria-label="Soil moisture">
+    <div class="card-header">
+      <h2 class="card-title">Soil Moisture</h2>
+      <span class="badge" id="plant-status-badge">—</span>
+    </div>
+
+    <div class="gauge-wrap">
+      <svg class="gauge-svg" viewBox="0 0 220 140" aria-hidden="true">
+        <!-- Background arc -->
+        <path class="gauge-track" d="M 20 120 A 90 90 0 0 1 200 120" fill="none" stroke-width="18" stroke-linecap="round"/>
+        <!-- Value arc -->
+        <path class="gauge-fill" id="gauge-arc" d="M 20 120 A 90 90 0 0 1 200 120" fill="none" stroke-width="18" stroke-linecap="round"
+              stroke-dasharray="283" stroke-dashoffset="283"/>
+        <!-- Min/Max markers -->
+        <text class="gauge-label" x="14" y="138">0%</text>
+        <text class="gauge-label" x="188" y="138">100%</text>
+        <!-- Centre value -->
+        <text class="gauge-value" id="gauge-value" x="110" y="105" text-anchor="middle">--%</text>
+        <text class="gauge-sub" id="gauge-sub" x="110" y="124" text-anchor="middle">—</text>
+      </svg>
+    </div>
+
+    <div class="threshold-bar-wrap">
+      <div class="threshold-bar" id="threshold-bar">
+        <div class="threshold-fill" id="threshold-fill" style="width:0%"></div>
+        <div class="threshold-marker" id="marker-min"  title="Min"></div>
+        <div class="threshold-marker" id="marker-tgt"  title="Target"></div>
+        <div class="threshold-marker" id="marker-max"  title="Max" style="background:#ef4444"></div>
+      </div>
+      <div class="threshold-labels">
+        <span>Dry</span><span>Target zone</span><span>Max</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── Prediction card ───────────────────────────────── -->
+  <section class="card" id="card-prediction" aria-label="Drying prediction">
+    <h2 class="card-title">Prediction</h2>
+    <div class="metric-row">
+      <div class="metric">
+        <span class="metric-value" id="drying-rate">—</span>
+        <span class="metric-label">%/hr drying rate</span>
+      </div>
+      <div class="metric">
+        <span class="metric-value" id="time-until-water">—</span>
+        <span class="metric-label">until water needed</span>
+      </div>
+    </div>
+    <p class="prediction-status dim" id="prediction-status">Collecting data…</p>
+    <canvas class="sparkline" id="sparkline-moisture" width="320" height="80" aria-label="Moisture history sparkline"></canvas>
+  </section>
+
+  <!-- ── Tank card ─────────────────────────────────────── -->
+  <section class="card" id="card-tank" aria-label="Water tank">
+    <h2 class="card-title">Water Tank</h2>
+    <div class="tank-wrap">
+      <div class="tank-body" id="tank-body">
+        <div class="tank-fill" id="tank-fill" style="height:0%"></div>
+        <div class="tank-bubbles" id="tank-bubbles" aria-hidden="true">
+          <div class="bubble"></div><div class="bubble"></div><div class="bubble"></div>
+        </div>
+      </div>
+      <div class="tank-info">
+        <span class="tank-pct" id="tank-pct">--%</span>
+        <span class="tank-state dim" id="tank-state">—</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── Pump / session card ───────────────────────────── -->
+  <section class="card" id="card-pump" aria-label="Pump status">
+    <h2 class="card-title">Pump</h2>
+    <div class="pump-indicator" id="pump-indicator">
+      <div class="pump-ring" id="pump-ring"></div>
+      <span class="pump-state" id="pump-state">OFF</span>
+    </div>
+    <div class="session-stats">
+      <div class="stat"><span id="daily-water">0</span><small>mL today</small></div>
+      <div class="stat"><span id="last-water">—</span><small>last watered</small></div>
+      <div class="stat"><span id="pulse-num">—</span><small>pulse #</small></div>
+    </div>
+    <div class="btn-row">
+      <button class="btn btn-primary" id="btn-water" onclick="manualWater()">💧 Water Now</button>
+      <button class="btn btn-danger"  id="btn-stop"  onclick="emergencyStop()">⏹ Stop</button>
+    </div>
+  </section>
+
+  <!-- ── Profile card ──────────────────────────────────── -->
+  <section class="card" id="card-profile" aria-label="Plant profile">
+    <h2 class="card-title">Plant Profile</h2>
+    <div class="profile-grid" id="profile-grid">
+      <label class="profile-chip active" data-id="cactus" id="profile-cactus">
+        <input type="radio" name="profile" value="cactus" hidden>
+        🌵 Cactus
+      </label>
+      <label class="profile-chip" data-id="normal" id="profile-normal">
+        <input type="radio" name="profile" value="normal" hidden>
+        🌱 Normal
+      </label>
+      <label class="profile-chip" data-id="moisture_loving" id="profile-moisture_loving">
+        <input type="radio" name="profile" value="moisture_loving" hidden>
+        🌿 Moisture-Loving
+      </label>
+      <label class="profile-chip" data-id="custom" id="profile-custom">
+        <input type="radio" name="profile" value="custom" hidden>
+        ⚙️ Custom
+      </label>
+    </div>
+
+    <div class="profile-thresholds">
+      <div class="th-row">
+        <span>Critical</span><span id="th-critical" class="mono">—%</span>
+      </div>
+      <div class="th-row">
+        <span>Min</span><span id="th-min" class="mono">—%</span>
+      </div>
+      <div class="th-row">
+        <span>Target</span><span id="th-target" class="mono">—%</span>
+      </div>
+      <div class="th-row">
+        <span>Max</span><span id="th-max" class="mono">—%</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── History card ──────────────────────────────────── -->
+  <section class="card card-wide" id="card-history" aria-label="Watering history">
+    <div class="card-header">
+      <h2 class="card-title">History</h2>
+      <button class="btn btn-ghost" id="btn-clear-history" onclick="clearHistory()">🗑 Clear</button>
+    </div>
+    <div class="table-wrap">
+      <table class="history-table" id="history-table">
+        <thead>
+          <tr>
+            <th>Time</th>
+            <th>Event</th>
+            <th>Moisture</th>
+            <th>Tank</th>
+            <th>Water (mL)</th>
+            <th>Notes</th>
+          </tr>
+        </thead>
+        <tbody id="history-tbody">
+          <tr><td colspan="6" class="dim center">Loading…</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- ── Config / calibration card ─────────────────────── -->
+  <section class="card card-wide" id="card-config" aria-label="Configuration">
+    <div class="card-header">
+      <h2 class="card-title">Configuration</h2>
+      <div class="toggle-wrap">
+        <label class="toggle" id="toggle-auto">
+          <input type="checkbox" id="chk-auto" onchange="saveConfig()">
+          <span class="slider"></span>
+        </label>
+        <span class="dim">Auto watering</span>
+        <label class="toggle" id="toggle-adaptive" style="margin-left:1rem">
+          <input type="checkbox" id="chk-adaptive" onchange="saveConfig()">
+          <span class="slider"></span>
+        </label>
+        <span class="dim">Adaptive prediction</span>
+      </div>
+    </div>
+
+    <!-- Calibration sub-section -->
+    <details class="calib-details" id="calib-section">
+      <summary>🔧 Soil Sensor Calibration</summary>
+      <div class="calib-body">
+        <p class="dim">Place sensor in <strong>dry air/soil</strong> → click Sample → record value.<br>
+           Place sensor in <strong>water</strong> → click Sample → record value.</p>
+        <div class="calib-row">
+          <label>Dry ADC value</label>
+          <input type="number" id="calib-dry" placeholder="e.g. 2800" class="input-field">
+        </div>
+        <div class="calib-row">
+          <label>Wet ADC value</label>
+          <input type="number" id="calib-wet" placeholder="e.g. 1100" class="input-field">
+        </div>
+        <div class="btn-row">
+          <button class="btn btn-ghost" id="btn-sample" onclick="calibSample()">📡 Sample Current</button>
+          <button class="btn btn-primary" id="btn-calib-set" onclick="calibSet()">✅ Apply Calibration</button>
+        </div>
+        <p class="calib-result dim" id="calib-result"></p>
+      </div>
+    </details>
+
+    <!-- Wi-Fi sub-section -->
+    <details class="calib-details" id="wifi-section">
+      <summary>📶 Wi-Fi Settings</summary>
+      <div class="calib-body">
+        <div class="calib-row">
+          <label>SSID</label>
+          <input type="text" id="wifi-ssid" placeholder="Network name" class="input-field">
+        </div>
+        <div class="calib-row">
+          <label>Password</label>
+          <input type="password" id="wifi-pass" placeholder="Password" class="input-field">
+        </div>
+        <button class="btn btn-primary" onclick="saveWifi()">💾 Save & Connect</button>
+      </div>
+    </details>
+  </section>
+
+  <!-- ── System info card ───────────────────────────────── -->
+  <section class="card" id="card-sysinfo" aria-label="System info">
+    <h2 class="card-title">System</h2>
+    <div class="sysinfo-grid">
+      <div class="sysinfo-row">
+        <span>State</span>
+        <span class="mono" id="sys-state">—</span>
+      </div>
+      <div class="sysinfo-row">
+        <span>Wi-Fi</span>
+        <span class="mono" id="sys-wifi">—</span>
+      </div>
+      <div class="sysinfo-row">
+        <span>IP</span>
+        <span class="mono" id="sys-ip">—</span>
+      </div>
+      <div class="sysinfo-row">
+        <span>RSSI</span>
+        <span class="mono" id="sys-rssi">—</span>
+      </div>
+      <div class="sysinfo-row">
+        <span>Uptime</span>
+        <span class="mono" id="sys-uptime">—</span>
+      </div>
+      <div class="sysinfo-row">
+        <span>Firmware</span>
+        <span class="mono" id="sys-fw">—</span>
+      </div>
+      <div class="sysinfo-row">
+        <span>Sensor raw</span>
+        <span class="mono" id="sys-raw">—</span>
+      </div>
+      <div class="sysinfo-row">
+        <span>Model pts</span>
+        <span class="mono" id="sys-model-pts">—</span>
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<footer class="footer">
+  Smart Plant Irrigation &nbsp;·&nbsp; v<span id="footer-fw">—</span>
+  &nbsp;·&nbsp; Refreshes every 5 s
+  &nbsp;·&nbsp; <span id="footer-sensor-state">Sensor: —</span>
+</footer>
+
+<script src="app.js"></script>
+</body>
+</html>
